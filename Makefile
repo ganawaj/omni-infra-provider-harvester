@@ -78,53 +78,6 @@ REMOVE_VOLUMES ?= false
 
 # help menu
 
-export define HELP_MENU_HEADER
-# Getting Started
-
-To build this project, you must have the following installed:
-
-- git
-- make
-- docker (19.03 or higher)
-
-## Creating a Builder Instance
-
-The build process makes use of experimental Docker features (buildx).
-To enable experimental features, add 'experimental: "true"' to '/etc/docker/daemon.json' on
-Linux or enable experimental features in Docker GUI for Windows or Mac.
-
-To create a builder instance, run:
-
-	docker buildx create --name local --use
-
-If running builds that needs to be cached aggresively create a builder instance with the following:
-
-	docker buildx create --name local --use --config=config.toml
-
-config.toml contents:
-
-[worker.oci]
-  gc = true
-  gckeepstorage = 50000
-
-  [[worker.oci.gcpolicy]]
-    keepBytes = 10737418240
-    keepDuration = 604800
-    filters = [ "type==source.local", "type==exec.cachemount", "type==source.git.checkout"]
-  [[worker.oci.gcpolicy]]
-    all = true
-    keepBytes = 53687091200
-
-If you already have a compatible builder instance, you may use that instead.
-
-## Artifacts
-
-All artifacts will be output to ./$(ARTIFACTS). Images will be tagged with the
-registry "$(REGISTRY)", username "$(USERNAME)", and a dynamic tag (e.g. $(IMAGE):$(IMAGE_TAG)).
-The registry and username can be overridden by exporting REGISTRY, and USERNAME
-respectively.
-
-endef
 
 ifneq (, $(filter $(WITH_RACE), t true TRUE y yes 1))
 GO_BUILDFLAGS += -race
@@ -138,7 +91,7 @@ else
 GO_LDFLAGS += -s
 endif
 
-all: unit-tests omni-infra-provider-kubevirt image-omni-infra-provider-kubevirt docker-compose-up docker-compose-down run-integration-test lint
+all: unit-tests omni-infra-provider-harvester image-omni-infra-provider-harvester docker-compose-up docker-compose-down run-integration-test lint
 
 $(ARTIFACTS):  ## Creates artifacts directory.
 	@mkdir -p $(ARTIFACTS)
@@ -197,15 +150,15 @@ unit-tests:  ## Performs unit tests
 unit-tests-race:  ## Performs unit tests with race detection enabled.
 	@$(MAKE) target-$@
 
-.PHONY: $(ARTIFACTS)/omni-infra-provider-kubevirt-linux-amd64
-$(ARTIFACTS)/omni-infra-provider-kubevirt-linux-amd64:
-	@$(MAKE) local-omni-infra-provider-kubevirt-linux-amd64 DEST=$(ARTIFACTS)
+.PHONY: $(ARTIFACTS)/omni-infra-provider-harvester-linux-amd64
+$(ARTIFACTS)/omni-infra-provider-harvester-linux-amd64:
+	@$(MAKE) local-omni-infra-provider-harvester-linux-amd64 DEST=$(ARTIFACTS)
 
-.PHONY: omni-infra-provider-kubevirt-linux-amd64
-omni-infra-provider-kubevirt-linux-amd64: $(ARTIFACTS)/omni-infra-provider-kubevirt-linux-amd64  ## Builds executable for omni-infra-provider-kubevirt-linux-amd64.
+.PHONY: omni-infra-provider-harvester-linux-amd64
+omni-infra-provider-harvester-linux-amd64: $(ARTIFACTS)/omni-infra-provider-harvester-linux-amd64  ## Builds executable for omni-infra-provider-harvester-linux-amd64.
 
-.PHONY: omni-infra-provider-kubevirt
-omni-infra-provider-kubevirt: omni-infra-provider-kubevirt-linux-amd64  ## Builds executables for omni-infra-provider-kubevirt.
+.PHONY: omni-infra-provider-harvester
+omni-infra-provider-harvester: omni-infra-provider-harvester-linux-amd64  ## Builds executables for omni-infra-provider-harvester.
 
 .PHONY: lint-markdown
 lint-markdown:  ## Runs markdownlint.
@@ -214,9 +167,9 @@ lint-markdown:  ## Runs markdownlint.
 .PHONY: lint
 lint: lint-golangci-lint lint-gofumpt lint-govulncheck lint-markdown  ## Run all linters for the project.
 
-.PHONY: image-omni-infra-provider-kubevirt
-image-omni-infra-provider-kubevirt:  ## Builds image for omni-infra-provider-kubevirt.
-	@$(MAKE) registry-$@ IMAGE_NAME="omni-infra-provider-kubevirt"
+.PHONY: image-omni-infra-provider-harvester
+image-omni-infra-provider-harvester:  ## Builds image for omni-infra-provider-harvester.
+	@$(MAKE) registry-$@ IMAGE_NAME="omni-infra-provider-harvester"
 
 .PHONY: docker-compose-up
 docker-compose-up:
@@ -226,7 +179,7 @@ docker-compose-up:
 docker-compose-down:
 	ARTIFACTS="$(ARTIFACTS)" SHA="$(SHA)" TAG="$(TAG)" USERNAME="$(USERNAME)" REGISTRY="$(REGISTRY)" PROTOBUF_TS_VERSION="$(PROTOBUF_TS_VERSION)" NODE_BUILD_ARGS="$(NODE_BUILD_ARGS)" TOOLCHAIN="$(TOOLCHAIN)" CGO_ENABLED="$(CGO_ENABLED)" GO_BUILDFLAGS="$(GO_BUILDFLAGS)" GOLANGCILINT_VERSION="$(GOLANGCILINT_VERSION)" GOFUMPT_VERSION="$(GOFUMPT_VERSION)" GOIMPORTS_VERSION="$(GOIMPORTS_VERSION)" PROTOBUF_GO_VERSION="$(PROTOBUF_GO_VERSION)" GRPC_GO_VERSION="$(GRPC_GO_VERSION)" GRPC_GATEWAY_VERSION="$(GRPC_GATEWAY_VERSION)" VTPROTOBUF_VERSION="$(VTPROTOBUF_VERSION)" DEEPCOPY_VERSION="$(DEEPCOPY_VERSION)" TESTPKGS="$(TESTPKGS)" COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 GO_LDFLAGS="$(GO_LDFLAGS)" docker compose -p talemu --file ./hack/compose/docker-compose.yml --file ./hack/compose/docker-compose.override.yml down --rmi local --remove-orphans --volumes=$(REMOVE_VOLUMES)
 
-run-integration-test: omni-infra-provider-kubevirt
+run-integration-test: omni-infra-provider-harvester
 	@hack/test/integration.sh
 
 .PHONY: rekres
@@ -247,4 +200,3 @@ release-notes: $(ARTIFACTS)
 conformance:
 	@docker pull $(CONFORMANCE_IMAGE)
 	@docker run --rm -it -v $(PWD):/src -w /src $(CONFORMANCE_IMAGE) enforce
-

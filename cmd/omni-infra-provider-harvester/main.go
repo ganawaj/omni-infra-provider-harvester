@@ -12,23 +12,24 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"slices"
 	"syscall"
 
+	harvnetworkclient "github.com/harvester/harvester-network-controller/pkg/generated/clientset/versioned"
+	harvclient "github.com/harvester/harvester/pkg/generated/clientset/versioned"
+	"github.com/harvester/harvester/pkg/generated/clientset/versioned/scheme"
+	"github.com/rancher/wrangler/v3/pkg/kubeconfig"
 	"github.com/siderolabs/omni/client/pkg/client"
 	"github.com/siderolabs/omni/client/pkg/infra"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/clientcmd"
-	kvv1 "kubevirt.io/api/core/v1"
-	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
-	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
+	kubeschema "k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes"
+	storageclient "k8s.io/client-go/kubernetes/typed/storage/v1"
+	"k8s.io/client-go/rest"
 
-	"github.com/siderolabs/omni-infra-provider-kubevirt/internal/pkg/provider"
-	"github.com/siderolabs/omni-infra-provider-kubevirt/internal/pkg/provider/meta"
+	"github.com/ganawaj/omni-infra-provider-harvester/internal/pkg/provider"
+	"github.com/ganawaj/omni-infra-provider-harvester/internal/pkg/provider/meta"
 )
 
 //go:embed data/schema.json
@@ -40,8 +41,8 @@ var icon []byte
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:          "provider",
-	Short:        "KubeVirt Omni infrastructure provider",
-	Long:         `Connects to Omni as an infra provider and manages VMs in KubeVirt`,
+	Short:        "Harvester Omni infrastructure provider",
+	Long:         `Connects to Omni as an infra provider and manages VMs in Harvester`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		loggerConfig := zap.NewProductionConfig()
@@ -53,44 +54,55 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("failed to create logger: %w", err)
 		}
 
-		scheme := runtime.NewScheme()
-
-		err = kvv1.AddToScheme(scheme)
+		baseConfig, err := kubeconfig.GetNonInteractiveClientConfig(cfg.kubeconfigFile).ClientConfig()
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get client config: %w", err)
 		}
 
-		err = cdiv1.AddToScheme(scheme)
+		// fmt.Println("baseConfig", baseConfig)
+
+		// Create a subresourced kubernetes rest client for harvester
+		copyConfig := rest.CopyConfig(baseConfig)
+		copyConfig.GroupVersion = &kubeschema.GroupVersion{Group: "subresources.kubevirt.io", Version: "v1"}
+		copyConfig.APIPath = "/apis"
+		copyConfig.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
+
+		restClient, err := rest.RESTClientFor(copyConfig)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get rest client: %w", err)
 		}
 
-		config, err := clientcmd.BuildConfigFromFlags("", cfg.kubeconfigFile)
+		kubeClient, err := kubernetes.NewForConfig(baseConfig)
 		if err != nil {
-			return fmt.Errorf("failed to read Kubernetes config: %w", err)
+			return fmt.Errorf("failed to get kube client: %w", err)
 		}
-
-		k8sClient, err := k8sclient.New(config, k8sclient.Options{
-			Scheme: scheme,
-		})
+		storageClassClient, err := storageclient.NewForConfig(baseConfig)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get storage class client: %w", err)
+		}
+		harvClient, err := harvclient.NewForConfig(baseConfig)
+		if err != nil {
+			return fmt.Errorf("failed to get harvester client: %w", err)
+		}
+		harvNetworkClient, err := harvnetworkclient.NewForConfig(baseConfig)
+		if err != nil {
+			return fmt.Errorf("failed to get harvester network client: %w", err)
 		}
 
 		if cfg.omniAPIEndpoint == "" {
 			return fmt.Errorf("omni-api-endpoint flag is not set")
 		}
 
-		volumeOpts := []v1.PersistentVolumeMode{
-			v1.PersistentVolumeBlock,
-			v1.PersistentVolumeFilesystem,
+		harvesterClient := &provider.HarvesterClient{
+			RestConfig:                baseConfig,
+			KubeClient:                kubeClient,
+			StorageClassClient:        storageClassClient,
+			HarvesterClient:           harvClient,
+			HarvesterNetworkClient:    harvNetworkClient,
+			KubeVirtSubresourceClient: restClient,
 		}
 
-		if cfg.dataVolumeMode != "" && slices.Index(volumeOpts, v1.PersistentVolumeMode(cfg.dataVolumeMode)) == -1 {
-			return fmt.Errorf("data-volume-mode flags should be one of %s", volumeOpts)
-		}
-
-		provisioner := provider.NewProvisioner(k8sClient, cfg.namespace, cfg.dataVolumeMode)
+		provisioner := provider.NewProvisioner(harvesterClient, "")
 
 		ip, err := infra.NewProvider(meta.ProviderID, provisioner, infra.ProviderConfig{
 			Name:        cfg.providerName,
@@ -124,7 +136,6 @@ var cfg struct {
 	providerName        string
 	providerDescription string
 	kubeconfigFile      string
-	namespace           string
 	dataVolumeMode      string
 	insecureSkipVerify  bool
 }
@@ -147,10 +158,8 @@ func init() {
 		"the endpoint of the Omni API, if not set, defaults to OMNI_ENDPOINT env var.")
 	rootCmd.Flags().StringVar(&meta.ProviderID, "id", meta.ProviderID, "the id of the infra provider, it is used to match the resources with the infra provider label.")
 	rootCmd.Flags().StringVar(&cfg.serviceAccountKey, "omni-service-account-key", os.Getenv("OMNI_SERVICE_ACCOUNT_KEY"), "Omni service account key, if not set, defaults to OMNI_SERVICE_ACCOUNT_KEY.")
-	rootCmd.Flags().StringVar(&cfg.providerName, "provider-name", "KubeVirt", "provider name as it appears in Omni")
-	rootCmd.Flags().StringVar(&cfg.providerDescription, "provider-description", "KubeVirt infrastructure provider", "Provider description as it appears in Omni")
+	rootCmd.Flags().StringVar(&cfg.providerName, "provider-name", "Harvester", "provider name as it appears in Omni")
+	rootCmd.Flags().StringVar(&cfg.providerDescription, "provider-description", "Harvester infrastructure provider", "Provider description as it appears in Omni")
 	rootCmd.Flags().StringVar(&cfg.kubeconfigFile, "kubeconfig-file", "~/.kube/config", "Kubeconfig file to use to connect to the cluster where KubeVirt is running")
-	rootCmd.Flags().StringVar(&cfg.namespace, "namespace", "default", "Kubernetes namespace to use for the resources created by the provider")
-	rootCmd.Flags().StringVar(&cfg.dataVolumeMode, "data-volume-mode", "", "DataVolume PVC type to use (Block|Filesystem)")
 	rootCmd.Flags().BoolVar(&cfg.insecureSkipVerify, "insecure-skip-verify", false, "ignores untrusted certs on Omni side")
 }

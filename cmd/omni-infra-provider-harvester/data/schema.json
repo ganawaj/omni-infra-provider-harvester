@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "properties": {
+    "cores": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "memory": {
+      "type": "integer",
+      "minimum": 2048
+    },
+    "architecture": {
+      "enum": ["amd64", "arm64"]
+    },
+    "disk_size": {
+      "type": "integer",
+      "minimum": 5,
+      "description": "In GB"
+    },
+    "namespace": {
+      "type": "string",
+      "description": "Namespace to use for the virtual machine"
+    },
+    "network_namespace": {
+      "type": "string",
+      "description": "Network namespace to use for the network interface"
+    },
+    "network_name": {
+      "type": "string",
+      "description": "Network interface binding"
+    },
+    "storage_class": {
+      "type": "string",
+      "description": "Storage class to use for the disk"
+    }
+  },
+  "required": [
+    "cores",
+    "memory",
+    "architecture",
+    "disk_size",
+    "network_namespace",
+    "network_name",
+    "namespace"
+  ]
+}

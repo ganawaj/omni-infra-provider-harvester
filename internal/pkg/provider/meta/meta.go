@@ -6,4 +6,4 @@
 package meta
 
 // ProviderID is the ID of the provider.
-var ProviderID = "kubevirt"
+var ProviderID = "harvester"
