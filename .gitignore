@@ -4,3 +4,5 @@
 
 _out
 hack/compose/docker-compose.override.yml
+main
+.DS_Store

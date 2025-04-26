@@ -12,8 +12,8 @@ import (
 	"github.com/cosi-project/runtime/pkg/resource/typed"
 	"github.com/siderolabs/omni/client/pkg/infra"
 
-	"github.com/siderolabs/omni-infra-provider-kubevirt/api/specs"
-	providermeta "github.com/siderolabs/omni-infra-provider-kubevirt/internal/pkg/provider/meta"
+	"github.com/ganawaj/omni-infra-provider-harvester/api/specs"
+	providermeta "github.com/ganawaj/omni-infra-provider-harvester/internal/pkg/provider/meta"
 )
 
 // NewMachine creates new Machine.
