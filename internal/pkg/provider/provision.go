@@ -352,10 +352,6 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 		provision.NewStep("syncMachine", func(ctx context.Context, logger *zap.Logger, pctx provision.Context[*resources.Machine]) error {
 			logger = logger.With(zap.String("id", pctx.State.TypedSpec().Value.Uuid))
 
-			defer func() {
-				pctx.SetMachineUUID(pctx.State.TypedSpec().Value.Uuid)
-			}()
-
 			var data Data
 
 			err := pctx.UnmarshalProviderData(&data)
@@ -372,7 +368,8 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 			}
 			if err == nil {
 				logger.Info("machine already exists", zap.String("machineName", vm.Name))
-
+				pctx.SetMachineUUID(pctx.State.TypedSpec().Value.Uuid)
+				pctx.SetMachineInfraID(string(vm.UID))
 				return nil
 			}
 
@@ -491,8 +488,8 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 					Name: "cloudinitdisk",
 					VolumeSource: kvv1.VolumeSource{
 						CloudInitNoCloud: &kvv1.CloudInitNoCloudSource{
-							UserData:    "#cloud-config\npassword: talos\nchpasswd: { expire: False }\nssh_pwauth: True\n",
-							NetworkData: "",
+							UserData:    pctx.ConnectionParams.JoinConfig,
+							NetworkData: `version: 1`,
 						},
 					},
 				},
@@ -540,7 +537,8 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 					VirtualMachines(p.namespace).
 					Create(ctx, vm, k8smetav1.CreateOptions{})
 				if err != nil {
-					return err
+					logger.Error("failed to create the machine", zap.Error(err))
+					return provision.NewRetryInterval(time.Second * 10)
 				}
 			} else {
 				_, err := p.harvesterClient.
@@ -549,11 +547,15 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 					VirtualMachines(p.namespace).
 					Update(ctx, vm, k8smetav1.UpdateOptions{})
 				if err != nil {
-					return err
+					logger.Error("failed to update the machine", zap.Error(err))
+					return provision.NewRetryInterval(time.Second * 10)
 				}
 			}
 
-			return provision.NewRetryInterval(time.Second * 10)
+			pctx.SetMachineUUID(pctx.State.TypedSpec().Value.Uuid)
+			pctx.SetMachineInfraID(string(vm.UID))
+
+			return nil
 		}),
 	}
 }
